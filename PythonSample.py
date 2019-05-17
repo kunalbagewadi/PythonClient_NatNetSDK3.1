@@ -23,21 +23,23 @@ from NatNetClient import NatNetClient
 # This is a callback function that gets connected to the NatNet client and called once per mocap frame.
 def receiveNewFrame( frameNumber, markerSetCount, unlabeledMarkersCount, rigidBodyCount, skeletonCount,
                     labeledMarkerCount, timecode, timecodeSub, timestamp, isRecording, trackedModelsChanged ):
-    print( "Received frame", frameNumber )
+    #print( "Received frame", frameNumber )
+    pass
 
 # This is a callback function that gets connected to the NatNet client. It is called once per rigid body per frame
 def receiveRigidBodyFrame( id, position, rotation ):
-    print( "Received frame for rigid body", id )
+    #print( "Received frame for rigid body", id )
+    pass
 
 # This will create a new NatNet client
 streamingClient = NatNetClient()
-print( "[debug] new NatNet client created")
+#print( "[debug] new NatNet client created")
 
 # Configure the streaming client to call our rigid body handler on the emulator to send data out.
 streamingClient.newFrameListener = receiveNewFrame
-streamingClient.rigidBodyListener = receiveRigidBodyFrame
+#streamingClient.rigidBodyListener = receiveRigidBodyFrame
 
-print( "[debug] calling run()")
+#print( "[debug] calling run()")
 
 # Start up the streaming client now that the callbacks are set up.
 # This will run perpetually, and operate on a separate thread.

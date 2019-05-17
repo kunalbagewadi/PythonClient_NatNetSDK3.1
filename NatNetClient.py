@@ -18,9 +18,21 @@ import socket
 import struct
 from threading import Thread
 
+# Comment out print() if you do not want data frames to be printed
 def trace( *args ):
-    #pass # print( "".join(map(str,args)) )
     print( "".join(map(str,args)) )
+    pass # print( "".join(map(str,args)) )
+
+def debug( *args ):
+    #print( "".join(map(str,args)) )
+    pass # print( "".join(map(str,args)) )
+
+# Form a geometry_msgs/Pose message to publish in ROS
+def skeletonMessage( id, pos, rot ):
+    debug("ID= ",id)
+    debug( "\tPosition= ", pos[0],",", pos[1],",", pos[2] )
+    debug( "\tOrientation= ", rot[0],",", rot[1],",", rot[2],",", rot[3] )
+    pass
 
 # Create structs for reading various object types to speed up parsing.
 Vector3 = struct.Struct( '<fff' )
@@ -48,7 +60,8 @@ class NatNetClient:
         self.dataPort = 1511
 
         # Set this to a callback method of your choice to receive per-rigid-body data at each frame.
-        self.rigidBodyListener = None
+        #self.rigidBodyListener = None
+        self.rigidBodyListener = skeletonMessage
         
         # NatNet stream version. This will be updated to the actual version the server is using during initialization.
         self.__natNetStreamVersion = (3,0,0,0)
@@ -89,13 +102,14 @@ class NatNetClient:
         return result
 
     # Unpack a rigid body object from a data packet
-    def __unpackRigidBody( self, data ):
+    def __unpackRigidBody( self, data, isSkeleton ):
         offset = 0
 
         # ID (4 bytes)
         id = int.from_bytes( data[offset:offset+4], byteorder='little' )
         offset += 4
         trace( "ID:", id )
+        #trace( "isSkeleton:", isSkeleton )
 
         # Position and orientation
         pos = Vector3.unpack( data[offset:offset+12] )
@@ -106,7 +120,9 @@ class NatNetClient:
         trace( "\tOrientation:", rot[0],",", rot[1],",", rot[2],",", rot[3] )
 
         # Send information to any listener.
-        if self.rigidBodyListener is not None:
+        # trigger callback only for skeleton data
+        #if self.rigidBodyListener is not None and isSkeleton==1:
+        if isSkeleton==1:
             self.rigidBodyListener( id, pos, rot )
 
         # RB Marker Data ( Before version 3.0.  After Version 3.0 Marker data is in description )
@@ -160,9 +176,9 @@ class NatNetClient:
         
         rigidBodyCount = int.from_bytes( data[offset:offset+4], byteorder='little' )
         offset += 4
-        trace( "Rigid Body Count:", rigidBodyCount )
+        trace( "Skeleton's Rigid Body Count:", rigidBodyCount )
         for j in range( 0, rigidBodyCount ):
-            offset += self.__unpackRigidBody( data[offset:] )
+            offset += self.__unpackRigidBody( data[offset:], 1 )
 
         return offset
 
@@ -215,7 +231,7 @@ class NatNetClient:
         trace( "Rigid Body Count:", rigidBodyCount )
 
         for i in range( 0, rigidBodyCount ):
-            offset += self.__unpackRigidBody( data[offset:] )
+            offset += self.__unpackRigidBody( data[offset:], 0 )
 
         # Version 2.1 and later
         skeletonCount = 0
@@ -317,6 +333,8 @@ class NatNetClient:
         else:
             timestamp, = FloatValue.unpack( data[offset:offset+4] )
             offset += 4
+
+        trace("**** Timestamp= ", timestamp)
 
         # Hires Timestamp (Version 3.0 and later)
         if( ( self.__natNetStreamVersion[0] >= 3 ) or  major == 0 ):
@@ -434,14 +452,14 @@ class NatNetClient:
                 self.__processMessage( data )
 
     def __processMessage( self, data ):
-        print( "Begin Packet\n------------\n" )
+        trace( "Begin Packet\n------------\n" )
         #print( "[debug][__processMessage] data=  ", data)
 
         messageID = int.from_bytes( data[0:2], byteorder='little' )
-        print( "Message ID:", messageID )
+        trace( "Message ID:", messageID )
         
         packetSize = int.from_bytes( data[2:4], byteorder='little' )
-        print( "Packet Size:", packetSize )
+        trace( "Packet Size:", packetSize )
 
         offset = 4
         if( messageID == self.NAT_FRAMEOFDATA ): # messageID==7
@@ -460,11 +478,9 @@ class NatNetClient:
             else:
                 message, separator, remainder = bytes(data[offset:]).partition( b'\0' )
                 offset += len( message ) + 1
-                #trace( "Command response:", message.decode( 'utf-8' ) )
-                print( "Command response:", message.decode( 'utf-8' ) )
+                trace( "Command response:", message.decode( 'utf-8' ) )
         elif( messageID == self.NAT_UNRECOGNIZED_REQUEST ): # messageID==100
-            #trace( "Received 'Unrecognized request' from server" )
-            print( "Received 'Unrecognized request' from server" )
+            trace( "Received 'Unrecognized request' from server" )
         elif( messageID == self.NAT_MESSAGESTRING ):
             message, separator, remainder = bytes(data[offset:]).partition( b'\0' )
             offset += len( message ) + 1
@@ -474,10 +490,11 @@ class NatNetClient:
             #trace( "ERROR: Unrecognized packet type" )
             trace( "ERROR: Unrecognized packet type" )
             
-        print( "End Packet\n----------\n" )
+        trace( "End Packet\n----------\n" )
             
     def sendCommand( self, command, commandStr, socket, address ):
         # Compose the message in our known message format
+        packetSize = 0  # added to check various client request types
         if( command == self.NAT_REQUEST_MODELDEF or command == self.NAT_REQUEST_FRAMEOFDATA ):
             packetSize = 0
             commandStr = ""
@@ -493,8 +510,8 @@ class NatNetClient:
         data += commandStr.encode( 'utf-8' )
         data += b'\0'
 
-        print( "[debug][sendCommand] data=  ", data)
-        print( "[debug][sendCommand] address=  ", address)
+        #print( "[debug][sendCommand] data=  ", data)
+        #print( "[debug][sendCommand] address=  ", address)
 
         socket.sendto( data, address )
         
@@ -502,31 +519,33 @@ class NatNetClient:
         # Create the data socket
         self.dataSocket = self.__createDataSocket( self.dataPort )
         if( self.dataSocket is None ):
-            print( "Could not open data channel" )
+            trace( "Could not open data channel" )
             exit
 
-        print( "[debug][run] dataSocket= ", self.dataSocket)
+        #print( "[debug][run] dataSocket= ", self.dataSocket)
 
         # Create the command socket
         self.commandSocket = self.__createCommandSocket()
         if( self.commandSocket is None ):
-            print( "Could not open command channel" )
+            trace( "Could not open command channel" )
             exit
 
-        print( "[debug][run] commandSocket= ", self.commandSocket)
+        #print( "[debug][run] commandSocket= ", self.commandSocket)
 
         # Create a separate thread for receiving data packets
         dataThread = Thread( target = self.__dataThreadFunction, args = (self.dataSocket, ))
         dataThread.start()
 
-        print( "[debug][run] dataThread created: ", dataThread)
+        #print( "[debug][run] dataThread created: ", dataThread)
 
         # Create a separate thread for receiving command packets
         commandThread = Thread( target = self.__dataThreadFunction, args = (self.commandSocket, ))
         commandThread.start()
 
-        print( "[debug][run] commandThread created: ", commandThread)
+        #print( "[debug][run] commandThread created: ", commandThread)
 
+        # use NAT_PING to get continuous stream of data
         self.sendCommand( self.NAT_PING, "", self.commandSocket, (self.serverIPAddress, self.commandPort) )
 
+        # use NAT_REQUEST_MODELDEF to get names of bodies/skeleton/markers being tracked
         #self.sendCommand( self.NAT_REQUEST_MODELDEF, "", self.commandSocket, (self.serverIPAddress, self.commandPort) )
